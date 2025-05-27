@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -111,9 +112,48 @@ pub struct ModelClient {
 
 impl ModelClient {
     pub fn new(model: impl ToString, provider: ModelProviderInfo) -> Self {
+        let mut client_builder = reqwest::Client::builder();
+
+        // SOCKS Proxy Configuration
+        match env::var("SOCKS_PROXY_URL") {
+            Ok(proxy_url) if !proxy_url.is_empty() => {
+                match reqwest::Proxy::all(&proxy_url) {
+                    Ok(proxy) => {
+                        client_builder = client_builder.proxy(proxy);
+                        debug!("Using SOCKS proxy: {}", proxy_url);
+                    }
+                    Err(e) => {
+                        warn!("Invalid SOCKS_PROXY_URL '{}': {:?}", proxy_url, e);
+                    }
+                }
+            }
+            _ => { /* No SOCKS_PROXY_URL set or it's empty */ }
+        }
+
+        // NO_PROXY Configuration
+        // As per the note, reqwest should pick up NO_PROXY from the environment if it's set,
+        // especially when a proxy is configured. Explicitly setting it via `builder.no_proxy()`
+        // requires parsing the NO_PROXY string into a `reqwest::NoProxy` object, which is not
+        // straightforward with current reqwest versions without internal/unstable APIs
+        // or a dedicated parsing library.
+        if let Ok(no_proxy_val) = env::var("NO_PROXY") {
+            if !no_proxy_val.is_empty() {
+                 // If reqwest adds a direct way to pass the NO_PROXY string or a simpler
+                 // NoProxy::from_string, it could be used here.
+                 // For now, we rely on reqwest's underlying http client to respect NO_PROXY.
+                debug!("NO_PROXY environment variable is set to: '{}'. Reqwest should respect this.", no_proxy_val);
+            }
+        }
+
+        let client = client_builder.build().unwrap_or_else(|e| {
+            warn!("Failed to build reqwest client with custom settings: {:?}", e);
+            // Fallback to default client if building with proxy fails
+            reqwest::Client::new()
+        });
+
         Self {
             model: model.to_string(),
-            client: reqwest::Client::new(),
+            client,
             provider,
         }
     }

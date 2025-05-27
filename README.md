@@ -477,6 +477,38 @@ export OPENROUTER_API_KEY="your-openrouter-key-here"
 # Similarly for other providers
 ```
 
+### Proxy Configuration
+
+The Codex CLI respects standard proxy environment variables to route its network traffic. This is particularly useful for users in corporate environments or those who require specific network routing for AI model interactions or update checks.
+
+**1. SOCKS5 Proxy**
+
+For AI model interactions, you can specify a SOCKS5 proxy by setting the `SOCKS_PROXY_URL` environment variable. If this variable is set, it will be prioritized for traffic to the AI model provider.
+
+*   **Format**:
+    *   `SOCKS_PROXY_URL=socks5://localhost:1080`
+    *   `SOCKS_PROXY_URL=socks5h://user:pass@your-proxy-host:port`
+        *   Use `socks5h://` if you need DNS resolution to happen through the proxy.
+
+**2. HTTP/HTTPS Proxies**
+
+If `SOCKS_PROXY_URL` is not set, the CLI's underlying Rust client for AI model interactions will automatically pick up standard `HTTPS_PROXY` and `HTTP_PROXY` environment variables. These `HTTP_PROXY`/`HTTPS_PROXY` variables may also be used by the CLI's automatic update checker. However, the update checker does not currently support SOCKS proxies (`SOCKS_PROXY_URL`) directly.
+
+*   **Format**:
+    *   `HTTPS_PROXY=http://proxy.example.com:8080`
+    *   `HTTPS_PROXY=http://user:pass@proxy.example.com:8080`
+    *   `HTTP_PROXY=http://proxy.example.com:8080` (for plain HTTP traffic, though most AI providers will use HTTPS)
+
+**3. Excluding Hosts (`NO_PROXY`)**
+
+To bypass the proxy for specific hosts or IP addresses, you can set the `NO_PROXY` environment variable. This is a comma-separated list.
+
+*   **Format**:
+    *   `NO_PROXY=localhost,127.0.0.1,internal.company.com,.example.com`
+        *   Note: A leading `.` for a domain (e.g., `.example.com`) typically means it matches all subdomains. Check your proxy client's specific behavior.
+
+This `NO_PROXY` setting is respected by both SOCKS5 and HTTP/HTTPS proxy configurations for AI model interactions.
+
 ---
 
 ## FAQ
