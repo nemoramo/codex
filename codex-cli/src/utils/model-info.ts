@@ -5,7 +5,6 @@ export type ModelInfo = {
   maxContextLength: number;
 };
 
-export type SupportedModelId = keyof typeof openAiModelInfo;
 export const openAiModelInfo = {
   "o1-pro-2025-03-19": {
     label: "o1 Pro (2025-03-19)",
@@ -200,3 +199,17 @@ export const openAiModelInfo = {
     maxContextLength: 128000,
   },
 } as const satisfies Record<string, ModelInfo>;
+
+export const geminiModelInfo = {
+  "gemini-1.5-pro-latest": {
+    label: "Gemini 1.5 Pro Latest",
+    maxContextLength: 1048576,
+  },
+} as const satisfies Record<string, ModelInfo>;
+
+export const allModelInfo = {
+  ...openAiModelInfo,
+  ...geminiModelInfo,
+} as const;
+
+export type SupportedModelId = keyof typeof allModelInfo;

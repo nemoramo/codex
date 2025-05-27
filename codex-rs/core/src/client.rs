@@ -29,6 +29,7 @@ use crate::client_common::ResponseStream;
 use crate::client_common::Summary;
 use crate::error::CodexErr;
 use crate::error::EnvVarError;
+use crate::gemini_completions::stream_gemini_content;
 use crate::error::Result;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::flags::OPENAI_REQUEST_MAX_RETRIES;
@@ -150,6 +151,7 @@ impl ModelClient {
 
                 Ok(ResponseStream { rx_event: rx })
             }
+            WireApi::Gemini => stream_gemini_content(prompt, &self.model, &self.client, &self.provider).await,
         }
     }
 

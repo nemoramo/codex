@@ -8,6 +8,7 @@
 mod chat_completions;
 mod client;
 mod client_common;
+pub mod gemini_completions;
 pub mod codex;
 pub use codex::Codex;
 pub mod codex_wrapper;
