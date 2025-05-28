@@ -328,7 +328,7 @@ try {
 }
 
 if (cli.flags.login) {
-  apiKey = await fetchApiKey(client.issuer, client.client_id);
+  apiKey = await fetchApiKey(provider);
   try {
     const home = os.homedir();
     const authDir = path.join(home, ".codex");
@@ -340,17 +340,28 @@ if (cli.flags.login) {
   } catch {
     /* ignore */
   }
-} else if (!apiKey) {
-  apiKey = await fetchApiKey(client.issuer, client.client_id);
+} else if (!apiKey && provider === "openai") { // Only attempt auto-fetch for OpenAI if not already loaded
+  apiKey = await fetchApiKey(provider);
+} else if (!apiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase())) {
+  // For other providers, if the key isn't in env or auth.json (for openai),
+  // getApiKey will be called later if needed, or the missing key error will be shown.
+  // We check process.env[providers[provider]?.envKey] later before erroring.
 }
+
 // Ensure the API key is available as an environment variable for legacy code
-process.env["OPENAI_API_KEY"] = apiKey;
+// This line might be provider-specific if we only want to set OPENAI_API_KEY for OpenAI
+// For now, if an apiKey is resolved, and it's for openai, set it.
+if (apiKey && provider === "openai") {
+  process.env["OPENAI_API_KEY"] = apiKey;
+}
+
 
 if (cli.flags.free) {
   // eslint-disable-next-line no-console
   console.log(`${chalk.bold("codex --free")} attempting to redeem credits...`);
   if (!savedTokens?.refresh_token) {
-    apiKey = await fetchApiKey(client.issuer, client.client_id, true);
+    // Ensure we are attempting to log in with OpenAI for credit redemption
+    apiKey = await fetchApiKey("openai", true); // Force login with OpenAI
     // fetchApiKey includes credit redemption as the end of the flow
   } else {
     await maybeRedeemCredits(
@@ -365,31 +376,68 @@ if (cli.flags.free) {
 // Set of providers that don't require API keys
 const NO_API_KEY_REQUIRED = new Set(["ollama"]);
 
-// Skip API key validation for providers that don't require an API key
-if (!apiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase())) {
-  // eslint-disable-next-line no-console
-  console.error(
-    `\n${chalk.red(`Missing ${provider} API key.`)}\n\n` +
-      `Set the environment variable ${chalk.bold(
-        `${provider.toUpperCase()}_API_KEY`,
-      )} ` +
-      `and re-run this command.\n` +
-      `${
-        provider.toLowerCase() === "openai"
-          ? `You can create a key here: ${chalk.bold(
-              chalk.underline("https://platform.openai.com/account/api-keys"),
-            )}\n`
-          : provider.toLowerCase() === "gemini"
-            ? `You can create a ${chalk.bold(
-                `${provider.toUpperCase()}_API_KEY`,
-              )} ` + `in the ${chalk.bold(`Google AI Studio`)}.\n`
-            : `You can create a ${chalk.bold(
-                `${provider.toUpperCase()}_API_KEY`,
-              )} ` + `in the ${chalk.bold(`${provider}`)} dashboard.\n`
-      }`,
-  );
-  process.exit(1);
+// API key validation logic
+// The API key might be set in the environment directly for the specific provider,
+// or for OpenAI, it might have been loaded from auth.json or obtained via sign-in.
+const providerEnvKey = config.providers[provider]?.envKey || `${provider.toUpperCase()}_API_KEY`;
+const currentProviderApiKey = process.env[providerEnvKey] || (provider === "openai" ? apiKey : "");
+
+
+if (!currentProviderApiKey && !NO_API_KEY_REQUIRED.has(provider.toLowerCase())) {
+  // If key is still missing, try to fetch it one last time (this will prompt if necessary)
+  // This covers cases where `fetchApiKey` wasn't called before or if `auth.json` didn't yield a key for openai.
+  if (provider !== "openai" || (provider === "openai" && !apiKey)) { // Avoid re-prompting if openai key was attempted & failed
+      apiKey = await fetchApiKey(provider); // This will prompt for the specific provider
+      if (!apiKey) { // If still no key after prompt
+        // eslint-disable-next-line no-console
+        console.error(
+          `\n${chalk.red(`Missing ${providerDisplayNameForError(provider)} API key.`)}\n\n` +
+            `Set the environment variable ${chalk.bold(providerEnvKeyForError(provider))} ` +
+            `and re-run this command, or paste it when prompted.\n` +
+            `${getProviderKeyInstructions(provider)}`,
+        );
+        process.exit(1);
+      }
+      // if apiKey was fetched, set it to the config and potentially OPENAI_API_KEY if it was openai
+      if (provider === "openai") process.env["OPENAI_API_KEY"] = apiKey;
+      else process.env[providerEnvKey] = apiKey; // Ensure it's set for the current session
+  } else if (!apiKey && provider === "openai") { // Specifically for OpenAI if it failed silently before
+      // eslint-disable-next-line no-console
+      console.error(
+        `\n${chalk.red(`Missing ${providerDisplayNameForError(provider)} API key.`)}\n\n` +
+          `Set the environment variable ${chalk.bold(providerEnvKeyForError(provider))} ` +
+          `and re-run this command, or use 'codex --login'.\n` +
+          `${getProviderKeyInstructions(provider)}`,
+      );
+      process.exit(1);
+  }
 }
+
+// Helper functions for error messages
+function providerDisplayNameForError(providerKey: string): string {
+  return config.providers[providerKey]?.name || providerKey;
+}
+
+function providerEnvKeyForError(providerKey: string): string {
+  return config.providers[providerKey]?.envKey || `${providerKey.toUpperCase()}_API_KEY`;
+}
+
+function getProviderKeyInstructions(providerKey: string): string {
+  const lowerProvider = providerKey.toLowerCase();
+  if (lowerProvider === "openai") {
+    return `You can create a key here: ${chalk.bold(
+      chalk.underline("https://platform.openai.com/account/api-keys"),
+    )}\nOr use 'codex --login' to sign in.`;
+  } else if (lowerProvider === "gemini") {
+    return `You can create a ${chalk.bold(providerEnvKeyForError(providerKey))} in the ${chalk.bold(
+      `Google AI Studio`,
+    )}.`;
+  }
+  return `You can create a ${chalk.bold(providerEnvKeyForError(providerKey))} in the ${chalk.bold(
+    providerDisplayNameForError(providerKey),
+  )} dashboard.`;
+}
+
 
 const flagPresent = Object.hasOwn(cli.flags, "disableResponseStorage");
 
@@ -398,7 +446,7 @@ const disableResponseStorage = flagPresent
   : (config.disableResponseStorage ?? false); // fall back to YAML, default to false
 
 config = {
-  apiKey,
+  apiKey: currentProviderApiKey || apiKey, // Use the most recently obtained/validated key
   ...config,
   model: model ?? config.model,
   notify: Boolean(cli.flags.notify),

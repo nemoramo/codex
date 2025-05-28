@@ -1,7 +1,8 @@
-import type { Choice } from "./get-api-key-components";
+import type { Choice, ApiKeyPromptProps } from "./get-api-key-components";
 import type { Request, Response } from "express";
 
 import { ApiKeyPrompt, WaitingForAuth } from "./get-api-key-components";
+import { providers } from "./providers";
 import chalk from "chalk";
 import express from "express";
 import fs from "fs/promises";
@@ -13,10 +14,13 @@ import os from "os";
 import path from "path";
 import React from "react";
 
-function promptUserForChoice(): Promise<Choice> {
+function promptUserForChoice(
+  promptProps: Omit<ApiKeyPromptProps, "onDone">,
+): Promise<Choice> {
   return new Promise<Choice>((resolve) => {
     const instance = render(
       <ApiKeyPrompt
+        {...promptProps}
         onDone={(choice: Choice) => {
           resolve(choice);
           instance.unmount();
@@ -735,27 +739,67 @@ async function signInFlow(issuer: string, clientId: string): Promise<string> {
 }
 
 export async function getApiKey(
-  issuer: string,
-  clientId: string,
+  providerKey: string,
   forceLogin: boolean = false,
 ): Promise<string> {
-  if (!forceLogin && process.env["OPENAI_API_KEY"]) {
-    return process.env["OPENAI_API_KEY"]!;
+  const selectedProviderDetails = providers[providerKey] || providers.openai;
+  const providerDisplayName = selectedProviderDetails.name;
+  const providerEnvKey = selectedProviderDetails.envKey;
+
+  // OpenAI specific details for sign-in
+  const openAIClientId = "pC1S5s0Ac0x0047Qvbv2092Y046gVK0U";
+  const openAIIssuer = "https://auth.openai.com";
+
+  if (!forceLogin && process.env[providerEnvKey]) {
+    return process.env[providerEnvKey]!;
   }
-  const choice = await promptUserForChoice();
+
+  const choice = await promptUserForChoice({
+    providerDisplayName,
+    providerEnvKey,
+  });
+
   if (choice.type === "apikey") {
-    process.env["OPENAI_API_KEY"] = choice.key;
+    process.env[providerEnvKey] = choice.key;
     return choice.key;
   }
-  const spinner = render(<WaitingForAuth />);
-  try {
-    const key = await signInFlow(issuer, clientId);
-    spinner.clear();
-    spinner.unmount();
-    process.env["OPENAI_API_KEY"] = key;
-    return key;
-  } catch (err) {
-    spinner.clear();
+
+  // Handle sign-in choice
+  if (providerDisplayName === "OpenAI" && choice.type === "signin") {
+    const spinner = render(<WaitingForAuth />);
+    try {
+      const key = await signInFlow(openAIIssuer, openAIClientId);
+      spinner.clear();
+      spinner.unmount();
+      // signInFlow saves to OPENAI_API_KEY in auth.json and also returns it
+      // For consistency, if providerEnvKey is OPENAI_API_KEY, this is fine.
+      // If providerEnvKey is different but we signed in via OpenAI,
+      // we should still set the specific providerEnvKey for the current session.
+      process.env[providerEnvKey] = key;
+      // If the selected provider was indeed OpenAI, OPENAI_API_KEY would also be set by signInFlow's auth.json logic.
+      return key;
+    } catch (err) {
+      spinner.clear();
+      spinner.unmount();
+      throw err;
+    }
+  } else if (choice.type === "signin") {
+    // This case should ideally not be reached if the UI prevents sign-in for non-OpenAI providers.
+    // eslint-disable-next-line no-console
+    console.error(
+      chalk.red(
+        `Sign-in is only supported for OpenAI. Please paste an API key for ${providerDisplayName}.`,
+      ),
+    );
+    // Re-prompt or exit
+    return getApiKey(providerKey, true); // Force re-prompt
+  }
+
+  // Fallback if something unexpected happens (should not be reached with current logic)
+  throw new Error(
+    "Could not obtain API key. Please set the appropriate environment variable or try again.",
+  );
+}
     spinner.unmount();
     throw err;
   }
