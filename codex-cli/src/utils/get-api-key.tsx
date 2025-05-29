@@ -779,10 +779,11 @@ export async function getApiKey(
       // If the selected provider was indeed OpenAI, OPENAI_API_KEY would also be set by signInFlow's auth.json logic.
       return key;
     } catch (err) {
-      spinner.clear();
-      spinner.unmount();
-      throw err;
+      spinner.clear(); // Added
+      spinner.unmount(); // Moved here
+      throw err; // Moved here
     }
+    // The extra '}' that was here should be removed.
   } else if (choice.type === "signin") {
     // This case should ideally not be reached if the UI prevents sign-in for non-OpenAI providers.
     // eslint-disable-next-line no-console
@@ -799,10 +800,6 @@ export async function getApiKey(
   throw new Error(
     "Could not obtain API key. Please set the appropriate environment variable or try again.",
   );
-}
-    spinner.unmount();
-    throw err;
-  }
 }
 
 export { maybeRedeemCredits };
